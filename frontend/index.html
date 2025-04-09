@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Анализ национальности по имени</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+        .result-container {
+            margin-top: 30px;
+            padding: 25px;
+            border-radius: 8px;
+            background-color: #f8f9fa;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        .country-card {
+            margin-bottom: 15px;
+            padding: 15px;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            transition: transform 0.2s;
+        }
+        .country-card:hover {
+            transform: translateY(-3px);
+        }
+        .chart-container {
+            margin-top: 30px;
+            height: 300px;
+        }
+        .api-url {
+            font-family: monospace;
+            background-color: #f0f0f0;
+            padding: 2px 5px;
+            border-radius: 3px;
+        }
+        .tab-content {
+            padding: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container py-5">
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <h1 class="text-center mb-4">Анализ национальности по имени</h1>
+                
+                <ul class="nav nav-tabs" id="myTab" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" id="get-tab" data-bs-toggle="tab" data-bs-target="#get" type="button" role="tab">Получить данные</button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" id="post-tab" data-bs-toggle="tab" data-bs-target="#post" type="button" role="tab">Отправить данные</button>
+                    </li>
+                </ul>
+                
+                <div class="tab-content" id="myTabContent">
+                    <!-- Вкладка GET -->
+                    <div class="tab-pane fade show active" id="get" role="tabpanel">
+                        <div class="mb-3">
+                            <label for="nameInput" class="form-label">Введите имя для анализа:</label>
+                            <div class="input-group">
+                                <input type="text" class="form-control" id="nameInput" placeholder="Например, Артем">
+                                <button class="btn btn-primary" id="getDataBtn">Получить данные</button>
+                            </div>
+                            <div class="form-text">API запрос: <span class="api-url">GET /names?name=...</span></div>
+                        </div>
+                        
+                        <div id="getResultContainer" class="result-container" style="display: none;">
+                            <h3>Результаты для "<span id="resultName"></span>"</h3>
+                            <div id="countryResults"></div>
+                            <div class="chart-container">
+                                <canvas id="probabilityChart"></canvas>
+                            </div>
+                        </div>
+                        
+                        <div id="getError" class="alert alert-danger mt-3" style="display: none;"></div>
+                    </div>
+                    
+                    <!-- Вкладка POST -->
+                    <div class="tab-pane fade" id="post" role="tabpanel">
+                        <div class="mb-3">
+                            <label for="postName" class="form-label">Имя:</label>
+                            <input type="text" class="form-control" id="postName" placeholder="Например, Артем">
+                        </div>
+                        <div class="mb-3">
+                            <label for="postCount" class="form-label">Количество:</label>
+                            <input type="number" class="form-control" id="postCount" value="100">
+                        </div>
+                        
+                        <h5>Страны:</h5>
+                        <div id="countriesContainer">
+                            <div class="country-input mb-2">
+                                <div class="row g-2">
+                                    <div class="col-md-5">
+                                        <input type="text" class="form-control country-code" placeholder="Код страны (например, RU)">
+                                    </div>
+                                    <div class="col-md-5">
+                                        <input type="number" step="0.0001" class="form-control probability" placeholder="Вероятность (0-1)">
+                                    </div>
+                                    <div class="col-md-2">
+                                        <button class="btn btn-outline-danger w-100 remove-country">×</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <button id="addCountryBtn" class="btn btn-outline-primary btn-sm mb-3">+ Добавить страну</button>
+                        <button id="postDataBtn" class="btn btn-primary w-100">Сохранить данные</button>
+                        
+                        <div id="postSuccess" class="alert alert-success mt-3" style="display: none;"></div>
+                        <div id="postError" class="alert alert-danger mt-3" style="display: none;"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function() {
+            // Функционал GET запроса
+            const getDataBtn = document.getElementById('getDataBtn');
+            const nameInput = document.getElementById('nameInput');
+            const getResultContainer = document.getElementById('getResultContainer');
+            const countryResults = document.getElementById('countryResults');
+            const resultName = document.getElementById('resultName');
+            const getError = document.getElementById('getError');
+            let probabilityChart = null;
+            
+            getDataBtn.addEventListener('click', async function() {
+                const name = nameInput.value.trim();
+                if (!name) {
+                    showError(getError, 'Пожалуйста, введите имя');
+                    return;
+                }
+                
+                try {
+                    const response = await fetch(`http://localhost:8000/names/?name=${encodeURIComponent(name)}`);
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Ошибка при получении данных');
+                    }
+                    
+                    const data = await response.json();
+                    displayResults(data);
+                } catch (error) {
+                    showError(getError, error.message);
+                }
+            });
+            
+            function displayResults(data) {
+                getError.style.display = 'none';
+                resultName.textContent = data.name;
+                
+                // Отображение стран
+                countryResults.innerHTML = '';
+                data.country.forEach(function(country) {
+                    const percentage = (country.probability * 100).toFixed(2);
+                    countryResults.innerHTML += `
+                        <div class="country-card">
+                            <div class="d-flex justify-content-between">
+                                <h5>${country.country_id}</h5>
+                                <span class="text-primary fw-bold">${percentage}%</span>
+                            </div>
+                            <div class="progress">
+                                <div class="progress-bar" role="progressbar" 
+                                     style="width: ${percentage}%" 
+                                     aria-valuenow="${percentage}" 
+                                     aria-valuemin="0" 
+                                     aria-valuemax="100"></div>
+                            </div>
+                        </div>
+                    `;
+                });
+                
+                // Обновление графика
+                updateChart(data);
+                getResultContainer.style.display = 'block';
+            }
+            
+            function updateChart(data) {
+                const ctx = document.getElementById('probabilityChart').getContext('2d');
+                
+                // Сортировка стран по вероятности для лучшего отображения
+                const sortedCountries = data.country.slice().sort(function(a, b) {
+                    return b.probability - a.probability;
+                });
+                
+                if (probabilityChart) {
+                    probabilityChart.destroy();
+                }
+                
+                probabilityChart = new Chart(ctx, {
+                    type: 'bar',
+                    data: {
+                        labels: sortedCountries.map(function(c) { return c.country_id; }),
+                        datasets: [{
+                            label: 'Вероятность (%)',
+                            data: sortedCountries.map(function(c) { return (c.probability * 100).toFixed(2); }),
+                            backgroundColor: [
+                                'rgba(54, 162, 235, 0.7)',
+                                'rgba(255, 99, 132, 0.7)',
+                                'rgba(75, 192, 192, 0.7)',
+                                'rgba(255, 206, 86, 0.7)',
+                                'rgba(153, 102, 255, 0.7)'
+                            ],
+                            borderColor: [
+                                'rgba(54, 162, 235, 1)',
+                                'rgba(255, 99, 132, 1)',
+                                'rgba(75, 192, 192, 1)',
+                                'rgba(255, 206, 86, 1)',
+                                'rgba(153, 102, 255, 1)'
+                            ],
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true,
+                                max: 100,
+                                title: {
+                                    display: true,
+                                    text: 'Вероятность (%)'
+                                }
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Функционал POST запроса
+            const postDataBtn = document.getElementById('postDataBtn');
+            const addCountryBtn = document.getElementById('addCountryBtn');
+            const countriesContainer = document.getElementById('countriesContainer');
+            const postSuccess = document.getElementById('postSuccess');
+            const postError = document.getElementById('postError');
+            
+            addCountryBtn.addEventListener('click', function() {
+                const newCountry = document.createElement('div');
+                newCountry.className = 'country-input mb-2';
+                newCountry.innerHTML = `
+                    <div class="row g-2">
+                        <div class="col-md-5">
+                            <input type="text" class="form-control country-code" placeholder="Код страны (например, RU)">
+                        </div>
+                        <div class="col-md-5">
+                            <input type="number" step="0.0001" class="form-control probability" placeholder="Вероятность (0-1)">
+                        </div>
+                        <div class="col-md-2">
+                            <button class="btn btn-outline-danger w-100 remove-country">×</button>
+                        </div>
+                    </div>
+                `;
+                countriesContainer.appendChild(newCountry);
+                
+                // Добавляем обработчик для новой кнопки удаления
+                newCountry.querySelector('.remove-country').addEventListener('click', function() {
+                    newCountry.remove();
+                });
+            });
+            
+            // Обработчик для первоначальной кнопки удаления
+            document.querySelector('.remove-country').addEventListener('click', function() {
+                this.closest('.country-input').remove();
+            });
+            
+            postDataBtn.addEventListener('click', async function() {
+                const name = document.getElementById('postName').value.trim();
+                const count = parseInt(document.getElementById('postCount').value);
+                
+                // Проверка ввода
+                if (!name) {
+                    showError(postError, 'Имя обязательно для заполнения');
+                    return;
+                }
+                
+                if (isNaN(count)) {
+                    showError(postError, 'Количество должно быть числом');
+                    return;
+                }
+                
+                // Сбор данных о странах
+                const countries = [];
+                const countryInputs = document.querySelectorAll('.country-input');
+                
+                countryInputs.forEach(function(input) {
+                    const code = input.querySelector('.country-code').value.trim();
+                    const prob = parseFloat(input.querySelector('.probability').value);
+                    
+                    if (code && !isNaN(prob)) {
+                        countries.push({
+                            country_id: code,
+                            probability: prob
+                        });
+                    }
+                });
+                
+                if (countries.length === 0) {
+                    showError(postError, 'Необходима хотя бы одна страна');
+                    return;
+                }
+                
+                // Подготовка данных для POST
+                const postData = {
+                    name: name,
+                    count: count,
+                    country: countries
+                };
+                
+                try {
+                    const response = await fetch('http://localhost:8000/names/', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(postData)
+                    });
+                    
+                    if (!response.ok) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || 'Ошибка при сохранении данных');
+                    }
+                    
+                    // Показ сообщения об успехе
+                    postError.style.display = 'none';
+                    postSuccess.textContent = 'Данные успешно сохранены!';
+                    postSuccess.style.display = 'block';
+                    
+                    // Очистка формы через 2 секунды
+                    setTimeout(function() {
+                        postSuccess.style.display = 'none';
+                    }, 2000);
+                    
+                } catch (error) {
+                    showError(postError, error.message);
+                }
+            });
+            
+            function showError(element, message) {
+                element.textContent = message;
+                element.style.display = 'block';
+                setTimeout(function() {
+                    element.style.display = 'none';
+                }, 5000);
+            }
+        });
+    </script>
+</body>
+</html>
